@@ -1,38 +1,14 @@
-FROM composer:2.8.1 as vendor
-
-WORKDIR /var/www
-
-COPY database/ database/
-COPY composer.json composer.json
-COPY composer.lock composer.lock
-
-RUN composer install \
-    --no-interaction \
-    --no-plugins \
-    --no-scripts \
-    --no-dev \
-    --prefer-dist
-
-COPY . .
-RUN composer dump-autoload
-
+# Используем php:8.3-fpm как базовый образ
 FROM php:8.3-fpm
 
-RUN apt-get update \
-    && apt-get install -y \
-      apt-utils \
-      libpq-dev \
-      libpng-dev \
-      libzip-dev \
-      zip unzip \
-      libxml2-dev \
-      git \
-      libjpeg-dev \
-      libjpeg-turbo-progs \
-      libfreetype-dev \
-      libfreetype6-dev \
-      libspng-dev \
-      libwebp-dev
+# Устанавливаем необходимые пакеты
+RUN apt-get update && apt-get install -y \
+    curl unzip git apt-utils libpq-dev libpng-dev libzip-dev \
+    libxml2-dev libjpeg-dev libfreetype6-dev libwebp-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
 RUN docker-php-ext-configure gd --with-freetype --with-webp --with-jpeg && \
     docker-php-ext-install -j$(nproc) gd && \
@@ -47,16 +23,23 @@ RUN docker-php-ext-configure gd --with-freetype --with-webp --with-jpeg && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-COPY ./_docker/app/php.ini /usr/local/etc/php/conf.d/php.ini
-
+# Создаем рабочую директорию
 WORKDIR /var/www
 
-COPY --from=vendor /var/www/vendor/ ./vendor/
+# Копируем весь проект
 COPY . .
 
+# Создаем .env перед artisan командами
 COPY .env.example .env
 
+# Копируем php.ini
+COPY ./_docker/app/php.ini /usr/local/etc/php/conf.d/php.ini
+
+# Устанавливаем зависимости проекта
+RUN composer install --no-interaction --no-dev --prefer-dist
+RUN composer dump-autoload
+
+# Оптимизация Laravel
 RUN php artisan key:generate
-RUN php artisan migrate --force
 RUN php artisan config:cache
 RUN php artisan route:cache
